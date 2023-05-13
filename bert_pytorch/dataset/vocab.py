@@ -90,14 +90,17 @@ class TorchVocab(object):
 
 
 class Vocab(TorchVocab):
-    def __init__(self, counter, max_size=None, min_freq=1):
-        self.pad_index = 0
-        self.unk_index = 1
-        self.eos_index = 2
-        self.sos_index = 3
-        self.mask_index = 4
-        super().__init__(counter, specials=["<pad>", "<unk>", "<eos>", "<sos>", "<mask>"],
-                         max_size=max_size, min_freq=min_freq)
+    def __init__(self, counter, max_size=None, min_freq=1, specials=None):
+        if specials is not None:
+            super().__init__(counter, specials=specials, max_size=max_size, min_freq=min_freq)
+        else:
+            self.pad_index = 0
+            self.unk_index = 1
+            self.eos_index = 2
+            self.sos_index = 3
+            self.mask_index = 4
+            super().__init__(counter, specials=["<pad>", "<unk>", "<eos>", "<sos>", "<mask>"],
+                             max_size=max_size, min_freq=min_freq)
 
     def to_seq(self, sentece, seq_len, with_eos=False, with_sos=False) -> list:
         pass
@@ -117,18 +120,18 @@ class Vocab(TorchVocab):
 
 # Building Vocab with text files
 class WordVocab(Vocab):
-    def __init__(self, texts, max_size=None, min_freq=1):
+    def __init__(self, texts, max_size=None, min_freq=1, specials=None):
         print("Building Vocab")
         counter = Counter()
         for line in tqdm.tqdm(texts):
             if isinstance(line, list):
                 words = line
             else:
-                words = line.replace("\n", "").replace("\t", "").split()
+                words = line.replace("\n", "").replace("\t", " ").split()
 
             for word in words:
                 counter[word] += 1
-        super().__init__(counter, max_size=max_size, min_freq=min_freq)
+        super().__init__(counter, max_size=max_size, min_freq=min_freq, specials=specials)
 
     def to_seq(self, sentence, seq_len=None, with_eos=False, with_sos=False, with_len=False):
         if isinstance(sentence, str):
@@ -186,8 +189,11 @@ def build():
 
 
 if __name__ == '__main__':
-    with open('../../data/para.txt', "r", encoding='utf-8') as f:
-        vocab = WordVocab(f)
+    with open('../../jtrans_relate_tokenizer/vocab.txt', "r", encoding='utf-8') as f:
+        special_token = ['[ukn_relate]', '[msk_relate]']
+        relate_vocab = WordVocab(f, specials=special_token)
+        relate_vocab.unk_index = 0
+        relate_vocab.mask_index = 1
 
-    print("VOCAB SIZE:", len(vocab))
-    # vocab.save_vocab('../../data/vocab_wiki.pkl')
+    print("VOCAB SIZE:", len(relate_vocab))
+    relate_vocab.save_vocab('../../data/relate_new.pkl')

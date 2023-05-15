@@ -39,6 +39,7 @@ if __name__ == '__main__':
     for i in range(len(train_dataset)):
         b = train_dataset[i]
         print(b)
+        break
     # for i, data in enumerate(train_data_loader):
     #     b = {key: value for key, value in data.items()}
     #     print(b["bert_input"].shape)
@@ -46,7 +47,7 @@ if __name__ == '__main__':
     #     break
 
     print("Building BERT model")
-    bert = BERT(len(vocab), hidden=786, n_layers=12, attn_heads=12)
+    bert = BERT(len(vocab), hidden=768, n_layers=12, attn_heads=12)
 
     print("Creating BERT Trainer")
     devices = try_all_gpus()

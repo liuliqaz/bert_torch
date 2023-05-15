@@ -18,7 +18,7 @@ def try_all_gpus():
 
 
 if __name__ == '__main__':
-    vocab_path = './data/paragraphs_pair_new.pkl'
+    vocab_path = './data/jtrans_x86.pkl'
     relate_vocab_path = './data/relate_new.pkl'
     train_data_path = './data/paragraphs_pair_new.txt'
 

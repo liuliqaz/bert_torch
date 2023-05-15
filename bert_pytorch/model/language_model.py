@@ -88,7 +88,7 @@ class BlockRelatePredict(nn.Module):
     n-class classification model : no_relate, t_jz, f_jz...
     """
 
-    def __init__(self, hidden_size, relate_size, input_size=786):
+    def __init__(self, hidden_size, relate_size, input_size=768):
         super().__init__()
         self.brp = nn.Sequential(nn.Linear(input_size, hidden_size),
                                  nn.ReLU(),

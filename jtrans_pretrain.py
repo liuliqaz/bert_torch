@@ -17,10 +17,16 @@ def try_all_gpus():
     return devices if devices else [torch.device('cpu')]
 
 
+def get_gpus_by_ids(ids):
+    devices = [torch.device(f'cuda:{i}')
+             for i in ids]
+    return devices if devices else [torch.device('cpu')]
+
+
 if __name__ == '__main__':
     vocab_path = './data/jtrans_x86.pkl'
     relate_vocab_path = './data/relate_new.pkl'
-    train_data_path = './data/paragraphs_pair_new.txt'
+    train_data_path = '../jTrans_pair_tiny.txt'
 
     print("Loading Vocab", vocab_path)
     vocab = WordVocab.load_vocab(vocab_path)
@@ -50,7 +56,9 @@ if __name__ == '__main__':
     bert = BERT(len(vocab), hidden=768, n_layers=12, attn_heads=12)
 
     print("Creating BERT Trainer")
-    devices = try_all_gpus()
+    # devices = try_all_gpus()
+    devices = get_gpus_by_ids([0,4])
+    print("Training device:", devices)
     with_cuda = True
     trainer = JTransTrainer(bert, len(vocab), len(relate_vocab), train_dataloader=train_data_loader,
                             test_dataloader=None, lr=1e-3, betas=(0.9, 0.999), weight_decay=0.01,

@@ -38,7 +38,7 @@ class JTransTrainer:
 
         # Setup cuda device for BERT training, argument -c, --cuda should be true
         cuda_condition = torch.cuda.is_available() and with_cuda
-        self.device = torch.device("cuda:0" if cuda_condition else "cpu")
+        self.device = torch.device(f"cuda:{cuda_devices[0].index}" if cuda_condition else "cpu")
 
         # This BERT model will be saved every epoch
         self.bert = bert
@@ -46,8 +46,8 @@ class JTransTrainer:
         self.model = JBERTLM(bert, vocab_size, relate_size).to(self.device)
 
         # Distributed GPU training if CUDA can detect more than 1 GPU
-        if with_cuda and torch.cuda.device_count() > 1:
-            print("Using %d GPUS for BERT" % torch.cuda.device_count())
+        if with_cuda and len(cuda_devices) > 1:
+            print("Using %d GPUS for BERT" % len(cuda_devices))
             self.model = nn.DataParallel(self.model, device_ids=cuda_devices)
 
         # Setting the train and test data loader
@@ -99,16 +99,16 @@ class JTransTrainer:
             data = {key: value.to(self.device) for key, value in data.items()}
 
             # 1. forward the next_sentence_prediction and masked_lm model
-            next_sent_output, mask_lm_output = self.model.forward(data["bert_input"], data["segment_label"])
+            block_relate_predict_output, mask_lm_output = self.model.forward(data["bert_input"], data["segment_label"])
 
             # 2-1. NLL(negative log likelihood) loss of is_next classification result
-            next_loss = self.criterion(next_sent_output, data["is_next"])
+            block_relate_predict_loss = self.criterion(block_relate_predict_output, data["relate_label"])
 
             # 2-2. NLLLoss of predicting masked token word
             mask_loss = self.criterion(mask_lm_output.transpose(1, 2), data["bert_label"])
 
             # 2-3. Adding next_loss and mask_loss : 3.4 Pre-training Procedure
-            loss = next_loss + mask_loss
+            loss = block_relate_predict_loss + mask_loss
 
             # 3. backward and optimization only in train
             if train:
@@ -117,10 +117,10 @@ class JTransTrainer:
                 self.optim_schedule.step_and_update_lr()
 
             # next sentence prediction accuracy
-            correct = next_sent_output.argmax(dim=-1).eq(data["is_next"]).sum().item()
+            correct = block_relate_predict_output.argmax(dim=-1).eq(data["relate_label"]).sum().item()
             avg_loss += loss.item()
             total_correct += correct
-            total_element += data["is_next"].nelement()
+            total_element += data["relate_label"].nelement()
 
             post_fix = {
                 "epoch": epoch,

@@ -48,10 +48,10 @@ def train_tokenizer(files, json_path, vocab_path):
 
 def main():
     parser = argparse.ArgumentParser(description="data tokenize trainer.")
-    parser.add_argument("--input_path", type=str, default='/home/liu/bcsd/datasets/test_data/test_pairs.txt')
-    parser.add_argument("--json_path", type=str, default='/home/liu/bcsd/datasets/test_data/tmp_json.json')
-    parser.add_argument("--vocab_path", type=str, default='/home/liu/bcsd/datasets/test_data/tmp_vocab.txt')
-    parser.add_argument("--output_dir", type=str, default='/home/liu/bcsd/datasets/test_data/tokenizer')
+    parser.add_argument("--input_path", type=str, default='/home/liu/bcsd/datasets/edge_gnn_datas/pretrain.txt')
+    parser.add_argument("--json_path", type=str, default='/home/liu/bcsd/datasets/edge_gnn_datas/tmp_json.json')
+    parser.add_argument("--vocab_path", type=str, default='/home/liu/bcsd/datasets/edge_gnn_datas/tmp_vocab.txt')
+    parser.add_argument("--output_dir", type=str, default='/home/liu/bcsd/datasets/edge_gnn_datas/tokenizer')
     args = parser.parse_args()
 
     input_path = args.input_path
@@ -103,6 +103,6 @@ def test():
 
 
 if __name__ == '__main__':
-    # main()
+    main()
 
-    test()
+    # test()

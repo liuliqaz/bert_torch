@@ -5,12 +5,14 @@ import os
 import random
 import datasets
 import torch
-from datasets import load_dataset, Dataset, DatasetDict
-from model_util import BertForMLMAndBRP
-
+from datasets import Dataset, DatasetDict
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 import transformers
+from accelerate import Accelerator
+from accelerate.logging import get_logger
+from accelerate.utils import set_seed
+from accelerate import DistributedDataParallelKwargs as DDPK
 from transformers import (
     CONFIG_MAPPING,
     MODEL_MAPPING,
@@ -21,9 +23,13 @@ from transformers import (
     DataCollatorForLanguageModeling
 )
 from transformers.models.bert.modeling_bert import BertForMaskedLM
+import wandb
 import sys
 import json
+from model_util import BertForMLMAndBRP
 
+
+logger = get_logger(__name__)
 MODEL_CONFIG_CLASSES = list(MODEL_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
@@ -45,8 +51,7 @@ def get_lr(optimizer):
 def parse_args():
     parser = argparse.ArgumentParser(description="Pretrain a transformers model on a Masked Language Modeling task")
     parser.add_argument(
-        "--train_file", type=str, default='/home/liu/bcsd/datasets/test_data/pretrain_with_rand_pair.txt', 
-        help="A csv or a json file containing the training data."
+        "--train_file", type=str, default='/home/liu/bcsd/datasets/test_data/pretrain_with_rand_pair.txt', help="A csv or a json file containing the training data."
     )
     parser.add_argument(
         "--validation_file", type=str, default=None, help="A csv or a json file containing the validation data."
@@ -70,7 +75,7 @@ def parse_args():
     parser.add_argument(
         "--tokenizer_name",
         type=str,
-        default='/home/liu/bcsd/datasets/test_data/tokenizer',
+        default='/home/liu/bcsd/datasets/edge_gnn_datas/tokenizer',
         help="Pretrained tokenizer name or path if not the same as model_name",
     )
     parser.add_argument(
@@ -125,10 +130,10 @@ def parse_args():
         "--num_warmup_steps", type=int, default=0, help="Number of steps for the warmup in the lr scheduler."
     )
     parser.add_argument(
-        "--output_dir", type=str, default='./hugging_pretrain', help="Where to store the final model."
+        "--output_dir", type=str, default='/home/liu/bcsd/bert_torch/saved_model/edge_rand_230904_512', help="Where to store the final model."
     )
     parser.add_argument(
-        "--seed", type=int, default=2022, help="A seed for reproducible training."
+        "--seed", type=int, default=2023, help="A seed for reproducible training."
     )
     parser.add_argument(
         "--model_type",
@@ -146,7 +151,7 @@ def parse_args():
     parser.add_argument(
         "--preprocessing_num_workers",
         type=int,
-        default=None,
+        default=2,
         help="The number of processes to use for the preprocessing.",
     )
     parser.add_argument(
@@ -163,6 +168,7 @@ def parse_args():
     )
     parser.add_argument(
         "--with_tracking",
+        default=True,
         action="store_true",
         help="Whether to enable experiment trackers for logging.",
     )
@@ -188,47 +194,56 @@ def parse_args():
 
 def main():
     args = parse_args()
+    kwargs = DDPK(broadcast_buffers=False, find_unused_parameters=True)
+
+    accelerator = Accelerator(mixed_precision='fp16', kwargs_handlers=[kwargs])
+    # accelerator = Accelerator(cpu=True)
+
+    project_name = 'cross_arch_angr_bert'
+    group_name = 'pretrain_bert'
     experiment_name = args.output_dir.split('/')[-1]
+    if accelerator.is_main_process and args.with_tracking:
+        wandb.init(project=project_name, group=group_name, name=experiment_name)
+        wandb.config.update(args)
 
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
-        filename=f'./{experiment_name}_pretrain_log.log'
     )
-    logger = logging.getLogger(__name__)
-    s_handle = logging.StreamHandler(sys.stdout)
-    s_handle.setLevel(logging.INFO)
-    s_handle.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(filename)s[:%(lineno)d] - %(message)s"))
-    logger.addHandler(s_handle)
-
-    datasets.utils.logging.set_verbosity_warning()
-    transformers.utils.logging.set_verbosity_info()
-
-    if args.output_dir is not None:
-        os.makedirs(args.output_dir, exist_ok=True)
-    if os.path.exists(os.path.join(args.data_cache_dir, experiment_name)):
-        args.overwrite_cache = False
+    logger.info(accelerator.state, main_process_only=False)
+    if accelerator.is_local_main_process:
+        datasets.utils.logging.set_verbosity_warning()
+        transformers.utils.logging.set_verbosity_info()
     else:
-        os.makedirs(os.path.join(args.data_cache_dir, experiment_name), exist_ok=True)
+        datasets.utils.logging.set_verbosity_error()
+        transformers.utils.logging.set_verbosity_error()
 
+    if args.seed is not None:
+        set_seed(args.seed)
+
+    if accelerator.is_main_process:
+        if args.output_dir is not None:
+            os.makedirs(args.output_dir, exist_ok=True)
+        if os.path.exists(os.path.join(args.data_cache_dir, experiment_name)):
+            args.overwrite_cache = False
+        else:
+            os.makedirs(os.path.join(args.data_cache_dir, experiment_name), exist_ok=True)
+    accelerator.wait_for_everyone()
 
     data_files = {}
     if args.train_file is not None:
         data_files["train"] = args.train_file
     if args.validation_file is not None:
         data_files["validation"] = args.validation_file
-    extension = args.train_file.split(".")[-1]
-    if extension == "txt":
-        extension = "text"
-
-    # raw_datasets = load_dataset(extension, data_files=data_files)
+    
+    # load data from txt
     read_file = data_files["train"]
     read_file = '/home/liu/bcsd/datasets/test_data/pretrain_with_rand_pair_sep.txt'
     with open(read_file, 'r') as f:
         json_str = f.read()
     parse_json = json.loads(json_str)
-    data_list = parse_json['train'][:10000]
+    data_list = parse_json['train'][:1000]
     train_list = Dataset.from_list(data_list[math.ceil(len(data_list)*args.validation_split_percentage*0.01):])
     eval_list = Dataset.from_list(data_list[:math.ceil(len(data_list)*args.validation_split_percentage*0.01)])
     raw_datasets = DatasetDict({
@@ -236,12 +251,18 @@ def main():
         'validation': eval_list,
     })
 
+    # load config
     if args.config_name:
         config = AutoConfig.from_pretrained(args.config_name)
     else:
         config = CONFIG_MAPPING[args.model_type]()
+        logger.warning("You are instantiating a new config instance from scratch.")
 
+    # load tokenizer & map dataset
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, use_fast=False, do_lower_case=False, do_basic_tokenize=False)
+    logger.info("Training new model from scratch")
+    column_names = raw_datasets["train"].column_names
+    text_column_name = "text" if "text" in column_names else column_names[0]
 
     if args.max_seq_length is None:
         max_seq_length = tokenizer.model_max_length
@@ -252,11 +273,8 @@ def main():
 
     config.vocab_size = tokenizer.vocab_size
     config.max_position_embeddings = max_seq_length
-    logger.info("Training new model from scratch")
-    # model init
-    model = BertForMLMAndBRP(config)
-    model.resize_token_embeddings(len(tokenizer))
-    column_names = raw_datasets["train"].column_names
+
+    padding = "max_length" if args.pad_to_max_length else False
 
     def tokenize_function(examples):
         result = tokenizer(
@@ -273,16 +291,16 @@ def main():
         result['arch_ids'] = [[ARCH_ID_MAP[i]] * max_seq_length for i in examples['arch']]
         return result
 
-    tokenized_datasets = raw_datasets.map(
-        tokenize_function,
-        batched=True,
-        num_proc=args.preprocessing_num_workers,
-        remove_columns=column_names,
-        # load_from_cache_file=not args.overwrite_cache,
-        # cache_file_names={k: os.path.join(args.data_cache_dir, experiment_name, f'{k}-tokenized') 
-        #                   for k in raw_datasets},
-        # desc="Running tokenizer on dataset line_by_line",
-    )
+    with accelerator.main_process_first():
+        raw_datasets = raw_datasets.filter(lambda x: (len(x['0']) + len(x['2']) <= max_seq_length-3))
+
+        tokenized_datasets = raw_datasets.map(
+            tokenize_function,
+            batched=True,
+            num_proc=args.preprocessing_num_workers,
+            remove_columns=column_names,
+            desc="Running tokenizer on dataset line_by_line",
+        )
 
     train_dataset = tokenized_datasets["train"]
     eval_dataset = tokenized_datasets["validation"]
@@ -298,6 +316,11 @@ def main():
     )
     eval_dataloader = DataLoader(eval_dataset, collate_fn=data_collator, batch_size=args.per_device_eval_batch_size)
 
+
+    # model init 
+    model = BertForMLMAndBRP(config)
+    model.resize_token_embeddings(len(tokenizer))
+    
     no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
         {
@@ -324,12 +347,14 @@ def main():
         num_training_steps=args.max_train_steps,
     )
 
-    model, optimizer, train_dataloader, eval_dataloader, lr_scheduler = model, optimizer, train_dataloader, eval_dataloader, lr_scheduler
+    model, optimizer, train_dataloader, eval_dataloader, lr_scheduler = accelerator.prepare(
+        model, optimizer, train_dataloader, eval_dataloader, lr_scheduler
+    )
 
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
 
-    total_batch_size = args.per_device_train_batch_size
+    total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
@@ -338,31 +363,34 @@ def main():
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
-    progress_bar = tqdm(range(args.max_train_steps))
+    progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
     completed_steps = 0
     starting_epoch = 0
     eval_loss = 0
-
-    device = torch.device('cuda:1')
-
-    model.to(device)
-
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
         total_loss = 0
         for step, batch in enumerate(train_dataloader):
-            batch = batch.to(device)
             outputs = model(**batch)
             loss = outputs.loss
             total_loss += loss.detach().float()
             loss = loss / args.gradient_accumulation_steps
-            loss.backward()
+            accelerator.backward(loss)
             if step % args.gradient_accumulation_steps == 0 or step == len(train_dataloader) - 1:
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
                 progress_bar.update(1)
                 completed_steps += 1
+            if accelerator.is_main_process and args.with_tracking:
+                wandb.log(
+                    {
+                        "lr": get_lr(optimizer),
+                        "train_loss": loss.item(),
+                        "step": completed_steps,
+                    },
+                    step=completed_steps,
+                )
             if completed_steps >= args.max_train_steps:
                 break
 
@@ -370,6 +398,10 @@ def main():
         losses = []
         correct = 0
         length = 0
+
+        brp_len = 0
+        brp_correct = 0
+
         for step, batch in enumerate(eval_dataloader):
             with torch.no_grad():
                 outputs = model(**batch)
@@ -382,8 +414,15 @@ def main():
             length += len(preds)
             correct += (preds == labels).float().sum()
             loss = outputs.loss
-            losses.append(loss.repeat(args.per_device_eval_batch_size))
+            losses.append(accelerator.gather(loss.repeat(args.per_device_eval_batch_size)))
+            # brp acc cal
+            brp_logits = outputs.brp_logits
+            brp_preds = torch.argmax(brp_logits, -1)
+            brp_len += len(brp_preds)
+            brp_correct += (brp_preds == batch.rela_token).float().sum()
+
         accuracy = 100 * correct / length
+        brp_acc = 100 * brp_correct / brp_len
         losses = torch.cat(losses)
         losses = losses[: len(eval_dataset)]
         try:
@@ -392,7 +431,40 @@ def main():
         except OverflowError:
             perplexity = float("inf")
 
-        logger.info(f"epoch {epoch}: perplexity: {perplexity} accuracy: {accuracy}")
+        logger.info(f"epoch {epoch}: perplexity: {perplexity} accuracy: {accuracy}, brp_acc: {brp_acc}")
+
+        if accelerator.is_main_process and args.with_tracking:
+            wandb.log(
+                {
+                    "accuracy": accuracy,
+                    "brp_acc": brp_acc,
+                    "perplexity": perplexity,
+                    "eval_loss": eval_loss,
+                    "avg_train_loss": total_loss.item() / len(train_dataloader),
+                    "epoch": epoch,
+                    "step": completed_steps,
+                },
+                step=completed_steps,
+            )
+
+        if args.checkpointing_steps == "epoch":
+            output_dir = f"epoch_{epoch}"
+            if args.output_dir is not None:
+                output_dir = os.path.join(args.output_dir, output_dir)
+            accelerator.wait_for_everyone()
+            unwrapped_model = accelerator.unwrap_model(model)
+            unwrapped_model.save_pretrained(
+                output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save
+            )
+
+    if args.output_dir is not None:
+        accelerator.wait_for_everyone()
+        unwrapped_model = accelerator.unwrap_model(model)
+        unwrapped_model.save_pretrained(
+            args.output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save
+        )
+        if accelerator.is_main_process:
+            tokenizer.save_pretrained(args.output_dir)
 
 
 if __name__ == "__main__":

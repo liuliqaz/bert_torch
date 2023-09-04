@@ -1,6 +1,7 @@
 data/
 output/
 saved_model/
+wandb/
 
 # Created by .ignore support plugin (hsz.mobi)
 ### Python template

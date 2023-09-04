@@ -27,6 +27,15 @@ import json
 MODEL_CONFIG_CLASSES = list(MODEL_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
+ARCH_ID_MAP = {
+    'mips-32': 2,
+    'mips-64': 2, 
+    'arm-32': 1, 
+    'arm-64': 1, 
+    'x86-32': 0, 
+    'x86-64': 0,
+}
+
 
 def get_lr(optimizer):
     for param_group in optimizer.param_groups:
@@ -131,7 +140,7 @@ def parse_args():
     parser.add_argument(
         "--max_seq_length",
         type=int,
-        default=512,
+        default=1024,
         help="The maximum total input sequence length after tokenization. Sequences longer than this will be truncated.",
     )
     parser.add_argument(
@@ -214,11 +223,12 @@ def main():
         extension = "text"
 
     # raw_datasets = load_dataset(extension, data_files=data_files)
-    
-    with open(data_files["train"], 'r') as f:
+    read_file = data_files["train"]
+    read_file = '/home/liu/bcsd/datasets/test_data/pretrain_with_rand_pair_sep.txt'
+    with open(read_file, 'r') as f:
         json_str = f.read()
     parse_json = json.loads(json_str)
-    data_list = parse_json['train'][:1000]
+    data_list = parse_json['train'][:10000]
     train_list = Dataset.from_list(data_list[math.ceil(len(data_list)*args.validation_split_percentage*0.01):])
     eval_list = Dataset.from_list(data_list[:math.ceil(len(data_list)*args.validation_split_percentage*0.01)])
     raw_datasets = DatasetDict({
@@ -248,14 +258,17 @@ def main():
 
     def tokenize_function(examples):
         result = tokenizer(
-            examples['sentence'],
+            # examples['sentence'],
+            examples['0'],
+            examples['2'],
             padding="max_length",
             truncation=True,
             max_length=max_seq_length,
             return_special_tokens_mask=True,
         )
         result['rela_token'] = tokenizer.convert_tokens_to_ids(examples['rela'])
-        result['rela_token_idx'] = [i + 1 for i in examples['sep']]
+        # result['rela_token_idx'] = [i + 1 for i in examples['sep']]
+        # result['arch_ids'] = [[ARCH_ID_MAP[i]] * max_seq_length for i in examples['arch']]
         return result
 
     tokenized_datasets = raw_datasets.map(
@@ -327,10 +340,16 @@ def main():
     completed_steps = 0
     starting_epoch = 0
     eval_loss = 0
+
+    device = torch.device('cuda:1')
+
+    model.to(device)
+
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
         total_loss = 0
         for step, batch in enumerate(train_dataloader):
+            batch = batch.to(device)
             outputs = model(**batch)
             loss = outputs.loss
             total_loss += loss.detach().float()

@@ -51,7 +51,7 @@ def get_lr(optimizer):
 def parse_args():
     parser = argparse.ArgumentParser(description="Pretrain a transformers model on a Masked Language Modeling task")
     parser.add_argument(
-        "--train_file", type=str, default='/home/liu/bcsd/datasets/test_data/pretrain_with_rand_pair.txt', help="A csv or a json file containing the training data."
+        "--train_file", type=str, default='/home/liu/bcsd/datasets/edge_gnn_datas/pretrain_with_rand_pair_sep.txt', help="A csv or a json file containing the training data."
     )
     parser.add_argument(
         "--validation_file", type=str, default=None, help="A csv or a json file containing the validation data."
@@ -130,7 +130,7 @@ def parse_args():
         "--num_warmup_steps", type=int, default=0, help="Number of steps for the warmup in the lr scheduler."
     )
     parser.add_argument(
-        "--output_dir", type=str, default='/home/liu/bcsd/bert_torch/saved_model/edge_rand_230904_512', help="Where to store the final model."
+        "--output_dir", type=str, default='/home/liu/bcsd/bert_torch/saved_model/edge_rand_230906_512_1_4', help="Where to store the final model."
     )
     parser.add_argument(
         "--seed", type=int, default=2023, help="A seed for reproducible training."
@@ -151,7 +151,7 @@ def parse_args():
     parser.add_argument(
         "--preprocessing_num_workers",
         type=int,
-        default=2,
+        default=1,
         help="The number of processes to use for the preprocessing.",
     )
     parser.add_argument(
@@ -199,7 +199,7 @@ def main():
     accelerator = Accelerator(mixed_precision='fp16', kwargs_handlers=[kwargs])
     # accelerator = Accelerator(cpu=True)
 
-    project_name = 'cross_arch_angr_bert'
+    project_name = 'cross_arch_ida_edge_bert'
     group_name = 'pretrain_bert'
     experiment_name = args.output_dir.split('/')[-1]
     if accelerator.is_main_process and args.with_tracking:
@@ -239,17 +239,20 @@ def main():
     
     # load data from txt
     read_file = data_files["train"]
-    read_file = '/home/liu/bcsd/datasets/test_data/pretrain_with_rand_pair_sep.txt'
+    # read_file = '/home/liu/bcsd/datasets/test_data/pretrain_with_rand_pair_sep.txt'
     with open(read_file, 'r') as f:
         json_str = f.read()
     parse_json = json.loads(json_str)
-    data_list = parse_json['train'][:1000]
+    data_list = parse_json['train']
+    data_list = data_list[:math.ceil(len(data_list)/4)]
     train_list = Dataset.from_list(data_list[math.ceil(len(data_list)*args.validation_split_percentage*0.01):])
     eval_list = Dataset.from_list(data_list[:math.ceil(len(data_list)*args.validation_split_percentage*0.01)])
     raw_datasets = DatasetDict({
         'train': train_list,
         'validation': eval_list,
     })
+
+    del json_str, parse_json, data_list
 
     # load config
     if args.config_name:

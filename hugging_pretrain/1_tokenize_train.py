@@ -9,10 +9,12 @@ import json
 import argparse
 from transformers import AutoTokenizer
 import collections
+from datasets import Dataset, DatasetDict
+
 
 SPECIAL_TOKENS = ["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]", "[no_rela]"]
 UNK_TOKENS = "[UNK]"
-
+BERT_SPECIAL_TOKENS = ["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]"]
 
 def prepare_tokenizer_trainer():
     """
@@ -102,7 +104,78 @@ def test():
     print('debug')
 
 
+def get_rela_token():
+    # pretrained_tok_path = '/home/liu/bcsd/datasets/edge_gnn_datas/tokenizer'
+    # tokenizer = AutoTokenizer.from_pretrained(pretrained_tok_path, do_lower_case=False, do_basic_tokenize=False, use_fast=False)
+    # res_rela_token = []
+    # for key in tokenizer.vocab.keys():
+    #     if key[0] == '[' and key[-1] == ']' and key not in BERT_SPECIAL_TOKENS:
+    #         res_rela_token.append(key + '\n')
+
+    # vocab_path = '/home/liu/bcsd/bert_torch/rela_vocab.txt'
+    # output_dir = '/home/liu/bcsd/datasets/edge_gnn_datas/rela_tokenizer'
+    # tokenizer = BertTokenizer(vocab_path)
+    # tokenizer.save_pretrained(output_dir)
+
+    s = ['[f_j]', '[t_j]']
+    p1 = '/home/liu/bcsd/datasets/edge_gnn_datas/tokenizer'
+    p2 = '/home/liu/bcsd/datasets/edge_gnn_datas/rela_tokenizer'
+    tokenizer = AutoTokenizer.from_pretrained(p2, use_fast=False, do_lower_case=False, do_basic_tokenize=False)
+    ids = tokenizer.convert_tokens_to_ids(s)
+
+    print('done')
+
+
+def try_tokenize():
+    p1 = '/home/liu/bcsd/datasets/edge_gnn_datas/tokenizer'
+    p2 = '/home/liu/bcsd/datasets/edge_gnn_datas/rela_tokenizer'
+
+    tokenizer = AutoTokenizer.from_pretrained(p1, use_fast=False, do_lower_case=False, do_basic_tokenize=False)
+    rela_tokenizer = AutoTokenizer.from_pretrained(p2, use_fast=False, do_lower_case=False, do_basic_tokenize=False)
+
+    def tokenize_function(examples):
+        result = tokenizer(
+            # examples['sentence'],
+            examples['0'],
+            examples['2'],
+            padding="max_length",
+            truncation=True,
+            max_length=512,
+            return_special_tokens_mask=True,
+        )
+        result['rela_token'] = rela_tokenizer.convert_tokens_to_ids(examples['rela'])
+        # result['rela_token_idx'] = [i + 1 for i in examples['sep']] # use [SEP] as predict token
+        return result
+
+
+    read_file = '/home/liu/bcsd/datasets/test_data/pretrain_with_rand_pair_sep.txt'
+    with open(read_file, 'r') as f:
+        json_str = f.read()
+    parse_json = json.loads(json_str)
+    data_list = parse_json['train'][:10]
+    raw_datasets = DatasetDict({
+        'train': Dataset.from_list(data_list),
+    })
+    raw_datasets = raw_datasets.filter(lambda x: (len(x['0']) + len(x['2']) <= 512-3))
+
+    tokenized_datasets = raw_datasets.map(
+        tokenize_function,
+        num_proc=1,
+        desc="Running tokenizer on dataset line_by_line",
+    )
+
+    for index in range(len(tokenized_datasets)):
+        ori = raw_datasets['train'][index]
+        t = tokenized_datasets['train'][index]
+        print(f"Sample {index} of the training set: {t}.")
+        print(f"Ori Sample {index} of the training set: {ori}.")
+
+
 if __name__ == '__main__':
-    main()
+    # main()
 
     # test()
+
+    # get_rela_token()
+
+    try_tokenize()

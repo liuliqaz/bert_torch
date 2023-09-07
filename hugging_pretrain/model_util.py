@@ -251,12 +251,21 @@ class BlockRelatePredict(nn.Module):
         return self.softmax(output)
 
 
+class BertOnlyBRPHead(nn.Module):
+    def __init__(self, hidden_size, relate_size):
+        super().__init__()
+        self.seq_relationship = nn.Linear(hidden_size, relate_size)
+
+    def forward(self, pooled_output):
+        seq_relationship_score = self.seq_relationship(pooled_output)
+        return seq_relationship_score
+
 class BertForMLMAndBRP(BertPreTrainedModel):
 
     _keys_to_ignore_on_load_unexpected = [r"pooler"]
     _keys_to_ignore_on_load_missing = [r"position_ids", r"predictions.decoder.bias"]
 
-    def __init__(self, config):
+    def __init__(self, config, rela_size):
         super().__init__(config)
 
         if config.is_decoder:
@@ -266,8 +275,9 @@ class BertForMLMAndBRP(BertPreTrainedModel):
             )
 
         self.bert = BertCustomModel(config, add_pooling_layer=False, custom_config={'arch_num':3})
-        self.brp = BlockRelatePredict(input_size=config.hidden_size, hidden_size=config.hidden_size, relate_size=config.vocab_size)
+        # self.brp = BlockRelatePredict(input_size=config.hidden_size, hidden_size=config.hidden_size, relate_size=rela_size)
         self.cls = BertOnlyMLMHead(config)
+        self.obrp = BertOnlyBRPHead(hidden_size=config.hidden_size, relate_size=rela_size)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -293,7 +303,7 @@ class BertForMLMAndBRP(BertPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         rela_token: Optional[torch.Tensor] = None,
-        rela_token_idx: Optional[torch.Tensor] = None,
+        # rela_token_idx: Optional[torch.Tensor] = None, # use [SEP] as predict token
         arch_ids: Optional[torch.Tensor] = None,
     ) -> Union[Tuple[torch.Tensor], MaskedLMOutput]:
         r"""
@@ -328,14 +338,19 @@ class BertForMLMAndBRP(BertPreTrainedModel):
             loss_fct = CrossEntropyLoss()  # -100 index = padding token
             masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
 
-        # rela_token_predict = [sequence_output[i][rela_token_idx[i]] for i in range(len(input_ids))]
-        rela_token_predict = sequence_output[[i for i in range(len(sequence_output))], rela_token_idx]
-        brp_prediction_scores = self.brp(rela_token_predict)
+        # rela_token_predict = sequence_output[[i for i in range(len(sequence_output))], rela_token_idx] # use [SEP] as predict token
+        # rela_token_predict = sequence_output[:, 0]
+        # brp_prediction_scores = self.brp(rela_token_predict)
+
+        pooled_output = sequence_output[:, 0]
+        seq_relationship_scores = self.obrp(pooled_output)
+
         
         brp_loss = None
         if rela_token is not None:
             loss_fct = CrossEntropyLoss()
-            brp_loss = loss_fct(brp_prediction_scores, rela_token)
+            # brp_loss = loss_fct(brp_prediction_scores, rela_token)
+            brp_loss = loss_fct(seq_relationship_scores, rela_token)
 
         if not return_dict:
             output = (prediction_scores,) + outputs[2:]
@@ -344,7 +359,7 @@ class BertForMLMAndBRP(BertPreTrainedModel):
         return MLMBRPOutput(
             loss=masked_lm_loss + brp_loss,
             logits=prediction_scores,
-            brp_logits=brp_prediction_scores,
+            brp_logits=seq_relationship_scores,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )

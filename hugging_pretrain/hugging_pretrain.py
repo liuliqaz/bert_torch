@@ -194,7 +194,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    kwargs = DDPK(broadcast_buffers=False, find_unused_parameters=True)
+    kwargs = DDPK(broadcast_buffers=False, find_unused_parameters=False)
 
     accelerator = Accelerator(mixed_precision='fp16', kwargs_handlers=[kwargs])
     # accelerator = Accelerator(cpu=True)
@@ -239,12 +239,12 @@ def main():
     
     # load data from txt
     read_file = data_files["train"]
-    # read_file = '/home/liu/bcsd/datasets/test_data/pretrain_with_rand_pair_sep.txt'
+    read_file = '/home/liu/bcsd/datasets/test_data/pretrain_with_rand_pair_sep.txt'
     with open(read_file, 'r') as f:
         json_str = f.read()
     parse_json = json.loads(json_str)
     data_list = parse_json['train']
-    data_list = data_list[:math.ceil(len(data_list)/4)]
+    # data_list = data_list[:math.ceil(len(data_list)/4)] # split dataset
     train_list = Dataset.from_list(data_list[math.ceil(len(data_list)*args.validation_split_percentage*0.01):])
     eval_list = Dataset.from_list(data_list[:math.ceil(len(data_list)*args.validation_split_percentage*0.01)])
     raw_datasets = DatasetDict({
@@ -265,7 +265,6 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, use_fast=False, do_lower_case=False, do_basic_tokenize=False)
     logger.info("Training new model from scratch")
     column_names = raw_datasets["train"].column_names
-    text_column_name = "text" if "text" in column_names else column_names[0]
 
     if args.max_seq_length is None:
         max_seq_length = tokenizer.model_max_length
@@ -279,6 +278,9 @@ def main():
 
     padding = "max_length" if args.pad_to_max_length else False
 
+    rela_tokenizer_name = '/home/liu/bcsd/datasets/edge_gnn_datas/rela_tokenizer'
+    rela_tokenizer = AutoTokenizer.from_pretrained(rela_tokenizer_name, use_fast=False, do_lower_case=False, do_basic_tokenize=False)
+
     def tokenize_function(examples):
         result = tokenizer(
             # examples['sentence'],
@@ -289,8 +291,8 @@ def main():
             max_length=max_seq_length,
             return_special_tokens_mask=True,
         )
-        result['rela_token'] = tokenizer.convert_tokens_to_ids(examples['rela'])
-        result['rela_token_idx'] = [i + 1 for i in examples['sep']]
+        result['rela_token'] = rela_tokenizer.convert_tokens_to_ids(examples['rela'])
+        # result['rela_token_idx'] = [i + 1 for i in examples['sep']] # use [SEP] as predict token
         result['arch_ids'] = [[ARCH_ID_MAP[i]] * max_seq_length for i in examples['arch']]
         return result
 
@@ -321,7 +323,7 @@ def main():
 
 
     # model init 
-    model = BertForMLMAndBRP(config)
+    model = BertForMLMAndBRP(config, rela_tokenizer.vocab_size)
     model.resize_token_embeddings(len(tokenizer))
     
     no_decay = ["bias", "LayerNorm.weight"]

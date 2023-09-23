@@ -51,7 +51,7 @@ def get_lr(optimizer):
 def parse_args():
     parser = argparse.ArgumentParser(description="Pretrain a transformers model on a Masked Language Modeling task")
     parser.add_argument(
-        "--train_file", type=str, default='/home/liu/bcsd/datasets/edge_gnn_datas/pretrain_with_rand_pair_sep.txt', help="A csv or a json file containing the training data."
+        "--train_file", type=str, default='/home/liu/bcsd/datasets/edge_gnn_datas/pretrain_sep_without_clang64.txt', help="A csv or a json file containing the training data."
     )
     parser.add_argument(
         "--validation_file", type=str, default=None, help="A csv or a json file containing the validation data."
@@ -130,7 +130,7 @@ def parse_args():
         "--num_warmup_steps", type=int, default=0, help="Number of steps for the warmup in the lr scheduler."
     )
     parser.add_argument(
-        "--output_dir", type=str, default='/home/liu/bcsd/bert_torch/saved_model/edge_rand_230906_512_1_4', help="Where to store the final model."
+        "--output_dir", type=str, default='/home/liu/bcsd/bert_torch/saved_model/edge_big_384', help="Where to store the final model."
     )
     parser.add_argument(
         "--seed", type=int, default=2023, help="A seed for reproducible training."
@@ -168,7 +168,6 @@ def parse_args():
     )
     parser.add_argument(
         "--with_tracking",
-        default=True,
         action="store_true",
         help="Whether to enable experiment trackers for logging.",
     )
@@ -239,11 +238,16 @@ def main():
     
     # load data from txt
     read_file = data_files["train"]
-    read_file = '/home/liu/bcsd/datasets/test_data/pretrain_with_rand_pair_sep.txt'
+
+    # debug use
+    # read_file = '/home/liu/bcsd/datasets/test_data/pretrain_with_rand_pair_sep.txt'
+    args.config_name = '/home/liu/bcsd/bert_torch/hugging_pretrain/config_384.json'    
+
     with open(read_file, 'r') as f:
         json_str = f.read()
     parse_json = json.loads(json_str)
     data_list = parse_json['train']
+    data_list = random.sample(data_list, 4000000)
     # data_list = data_list[:math.ceil(len(data_list)/4)] # split dataset
     train_list = Dataset.from_list(data_list[math.ceil(len(data_list)*args.validation_split_percentage*0.01):])
     eval_list = Dataset.from_list(data_list[:math.ceil(len(data_list)*args.validation_split_percentage*0.01)])
